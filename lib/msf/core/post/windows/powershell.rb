@@ -118,26 +118,34 @@ module Powershell
 		cmd_out = ""
 		results = {}
 
-		session.response_timeout = time_out.to_i
-		# Execute script
-		psh_process = session.sys.process.execute("powershell -EncodedCommand  " +
-				"#{script}", nil, {'Hidden' => true, 'Channelized' => true})
+		begin
+			::Timeout::timeout(time_out) do
+				# Execute script
 
-		# Save the PID of the process to kill it and any child process if timeout or hang
-		psh_pid = psh_process.pid
+				psh_process = session.sys.process.execute("powershell -EncodedCommand  " +
+						"#{script}", nil, {'Hidden' => true, 'Channelized' => true})
 
-		# Read the channel output
-		while (channel = psh_process.channel.read)
-			break if channel == ""
-			cmd_out << channel
+				# Save the PID of the process to kill it and any child process if timeout or hang
+				psh_pid = psh_process.pid
+
+				# Read the channel output
+				while (channel = psh_process.channel.read)
+					break if channel == ""
+					cmd_out << channel
+				end
+
+				results[:output] = cmd_out
+				results[:pid] = psh_pid
+				# Close channel
+				psh_process.channel.close
+
+				#Close the process
+				psh_process.close
+			end
+		rescue Timeout::Error
+			clean_up(psh_pid)
+			raise Timeout::Error
 		end
-		results[:output] = cmd_out
-		results[:pid] = psh_process.pid
-		# Close channel
-		psh_process.channel.close
-
-		#Close the process
-		psh_process.close
 
 		return results
 	end
