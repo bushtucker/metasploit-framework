@@ -103,12 +103,12 @@ class Metasploit3 < Msf::Post
 		print_status('Executing the script.')
 		cmd_out = execute_script(script, datastore['TIMEOUT'])
 		vprint_good("Script Output:")
-		vprint_line(cmd_out)
-		script_log = store_loot("host.command.powershell", "text/plain", session, cmd_out ,
+		vprint_line(cmd_out[:output])
+		script_log = store_loot("host.command.powershell", "text/plain", session, cmd_out[:output] ,
 			"#{script_name}.txt", "script Output #{script_name}")
 		print_status("Command output saved to: #{script_log}")
 		if require_cleanup
-			vprint_status(cleanup(env_suffix))
+			vprint_status(cleanup(cmd_out[:pid], env_suffix))
 		end
 
 		# That's it

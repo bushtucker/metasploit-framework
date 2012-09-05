@@ -115,51 +115,31 @@ module Powershell
 	#
 	def execute_script(script, time_out = 15)
 		psh_pid = nil
-		pids = []
 		cmd_out = ""
-		begin
-			::Timeout::timeout(time_out) do
-				# Execute scriot
-				psh_process = session.sys.process.execute("powershell -EncodedCommand  " +
-						"#{script}", nil, {'Hidden' => true, 'Channelized' => true})
+		results = {}
 
-				# Save the PID of the process to kill it and any child process if timeout or hang
-				psh_pid = psh_process.pid
+		session.response_timeout = time_out.to_i
+		# Execute script
+		psh_process = session.sys.process.execute("powershell -EncodedCommand  " +
+				"#{script}", nil, {'Hidden' => true, 'Channelized' => true})
 
-				# Read the channel output
-				while (channel = psh_process.channel.read)
-					cmd_out << channel
-				end
+		# Save the PID of the process to kill it and any child process if timeout or hang
+		psh_pid = psh_process.pid
 
-				# Close channel
-				psh_process.channel.close
-
-				#Close the process
-				psh_process.close
-			end
-
-		# Do cleanup if the script hangs or runs for to long. Removes any child process
-		# that could have been created
-		rescue Timeout::Error
-			# Finding PIDs of processes created
-			session.sys.process.processes.each do |proc|
-				pids << proc['pid'] if (proc["ppid"] == psh_pid.to_i)
-			end
-			if pids.length >> 0
-				# add original process pid to the list
-				pids << psh_pid
-
-				# terminating processes
-				pids.each do |pid|
-					session.sys.process.kill(pid)
-				end
-			else
-				session.sys.process.kill(psh_pid)
-			end
-			# Raise timeout error after cleanup so it is know a timeout happened
-			raise Timeout::Error
+		# Read the channel output
+		while (channel = psh_process.channel.read)
+			break if channel == ""
+			cmd_out << channel
 		end
-		return cmd_out
+		results[:output] = cmd_out
+		results[:pid] = psh_process.pid
+		# Close channel
+		psh_process.channel.close
+
+		#Close the process
+		psh_process.close
+
+		return results
 	end
 
 
@@ -220,15 +200,45 @@ module Powershell
 	#
 	# Clean up powershell script for chunks stored in environment variables
 	#
-	def clean_up(env_suffix)
-		# Remove environment variables
-		env_del_command =  "[Environment]::GetEnvironmentVariables('User').keys|"
-		env_del_command += "Select-String #{env_suffix}|%{"
-		env_del_command += "[Environment]::SetEnvironmentVariable($_,$null,'User')}"
-		script = compress_script(env_del_command, eof)
-		cmd_out = execute_script(script)
+	def clean_up(pid, env_suffix = nil)
+		pids = []
 
-		return cmd_out
+		#
+		#Clean left over processes first
+		#
+
+		# Finding PIDs of processes created
+		session.sys.process.processes.each do |proc|
+			pids << proc['pid'] if (proc["ppid"] == pid.to_i)
+		end
+		if pids.length >> 0
+			# add original process pid to the list
+			pids << pid
+
+			# terminating processes
+			pids.each do |p|
+				session.sys.process.kill(p)
+			end
+		else
+			session.sys.process.processes.each do |proc|
+				if (proc["pid"] == pid.to_i)
+					session.sys.process.kill(pid)
+				end
+			end
+		end
+
+		#
+		# Remove environment variables
+		#
+		if not env_suffix.nil?
+			env_del_command =  "[Environment]::GetEnvironmentVariables('User').keys|"
+			env_del_command += "Select-String #{env_suffix}|%{"
+			env_del_command += "[Environment]::SetEnvironmentVariable($_,$null,'User')}"
+			script = compress_script(env_del_command, eof)
+			cmd_out = execute_script(script)
+			clean_up(cmd_out[:pid])
+			return cmd_out[:output]
+		end
 	end
 
 end
